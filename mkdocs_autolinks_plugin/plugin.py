@@ -80,14 +80,38 @@ class AutoLinksPlugin(BasePlugin):
         # Getting the page path that we are linking from
         abs_page_path = page.file.abs_src_path
 
-        # Look for matches and replace
-        markdown = re.sub(
+        # Process autolinks while preserving HTML comments
+        result = []
+        last_end = 0
+        
+        # Find all HTML comments (single-line and multi-line)
+        comment_pattern = r'<!--.*?-->'
+        
+        for match in re.finditer(comment_pattern, markdown, re.DOTALL):
+            # Process the non-comment section before this comment
+            non_comment_section = markdown[last_end:match.start()]
+            processed_section = re.sub(
+                AUTOLINK_RE,
+                AutoLinkReplacer(base_docs_dir, abs_page_path, self.filename_to_abs_path),
+                non_comment_section,
+            )
+            result.append(processed_section)
+            
+            # Add the comment unchanged
+            result.append(match.group(0))
+            
+            last_end = match.end()
+        
+        # Process any remaining content after the last comment
+        final_section = markdown[last_end:]
+        processed_final = re.sub(
             AUTOLINK_RE,
             AutoLinkReplacer(base_docs_dir, abs_page_path, self.filename_to_abs_path),
-            markdown,
+            final_section,
         )
-
-        return markdown
+        result.append(processed_final)
+        
+        return ''.join(result)
 
     def init_filename_to_abs_path(self, files):
         self.filename_to_abs_path = defaultdict(list)
