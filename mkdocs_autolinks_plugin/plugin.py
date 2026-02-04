@@ -122,4 +122,9 @@ class AutoLinksPlugin(BasePlugin):
         self.filename_to_abs_path = defaultdict(list)
         for file_ in files:
             filename = os.path.basename(file_.abs_src_path)
+
+            # Skip dotfiles (excluded from the build)
+            if filename.startswith("."):
+                continue
+
             self.filename_to_abs_path[filename].append(file_.abs_src_path)
