@@ -97,11 +97,10 @@ class AutoLinksPlugin(BasePlugin):
                 continue
 
             if COMMENT_START in line:
-                # Enter comment block
                 if COMMENT_END not in line:
                     in_comment = True
 
-                # Process only the visible portion before the comment
+                # Process only visible content before the comment
                 visible, comment = line.split(COMMENT_START, 1)
                 processed = re.sub(AUTOLINK_RE, replacer, visible)
                 output.append(processed + COMMENT_START + comment)
@@ -124,13 +123,13 @@ class AutoLinksPlugin(BasePlugin):
         for file_ in files:
             filename = os.path.basename(file_.abs_src_path)
 
-            # Skip dotfiles only (not files in dot-directories)
+            # Skip dotfiles only (not dot-directories)
             if filename.startswith("."):
                 continue
 
             self.filename_to_abs_path[filename].append(file_.abs_src_path)
 
-        # Fail build on duplicate filenames
+        # Report duplicate filenames (do not fail the build)
         duplicates = {
             name: paths
             for name, paths in self.filename_to_abs_path.items()
@@ -144,8 +143,8 @@ class AutoLinksPlugin(BasePlugin):
                     f"- {filename}:\n    " + "\n    ".join(paths)
                 )
 
-            raise RuntimeError(
+            LOG.warning(
                 "AutoLinksPlugin found duplicate filenames. "
-                "Filenames must be unique across the docs tree:\n\n"
-                + "\n".join(messages)
+                "Filename-based autolinks may be ambiguous.\n\n%s",
+                "\n".join(messages),
             )
