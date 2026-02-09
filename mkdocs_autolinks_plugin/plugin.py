@@ -35,6 +35,11 @@ class AutoLinkReplacer:
 
     def __call__(self, match):
         filename = match.group(3).strip()
+
+        # Ignore dotfile references silently
+        if filename.startswith("."):
+            return match.group(0)
+
         abs_linker_dir = os.path.dirname(self.abs_page_path)
 
         if filename not in self.filename_to_abs_path:
@@ -46,16 +51,8 @@ class AutoLinkReplacer:
             return match.group(0)
 
         abs_link_paths = self.filename_to_abs_path[filename]
-
-        if len(abs_link_paths) > 1:
-            LOG.warning(
-                "AutoLinksPlugin: Duplicate filename referred to in '%s': '%s' exists at %s",
-                self.abs_page_path,
-                filename,
-                abs_link_paths,
-            )
-
         abs_link_path = abs_link_paths[0]
+
         rel_link_path = quote(
             pathlib.PurePath(
                 os.path.relpath(abs_link_path, abs_linker_dir)
@@ -92,19 +89,22 @@ class AutoLinksPlugin(BasePlugin):
                 output.append(line)
                 continue
 
-            # Enter comment block
-            if COMMENT_START in line and not in_comment:
-                in_comment = True
+            # Handle multi-line HTML comments
+            if in_comment:
                 output.append(line)
                 if COMMENT_END in line:
                     in_comment = False
                 continue
 
-            # Inside comment block
-            if in_comment:
-                output.append(line)
-                if COMMENT_END in line:
-                    in_comment = False
+            if COMMENT_START in line:
+                # Enter comment block
+                if COMMENT_END not in line:
+                    in_comment = True
+
+                # Process only the visible portion before the comment
+                visible, comment = line.split(COMMENT_START, 1)
+                processed = re.sub(AUTOLINK_RE, replacer, visible)
+                output.append(processed + COMMENT_START + comment)
                 continue
 
             # Inside fenced code block
@@ -120,11 +120,32 @@ class AutoLinksPlugin(BasePlugin):
 
     def init_filename_to_abs_path(self, files):
         self.filename_to_abs_path = defaultdict(list)
+
         for file_ in files:
             filename = os.path.basename(file_.abs_src_path)
 
-            # Skip dotfiles (excluded from the build)
+            # Skip dotfiles only (not files in dot-directories)
             if filename.startswith("."):
                 continue
 
             self.filename_to_abs_path[filename].append(file_.abs_src_path)
+
+        # Fail build on duplicate filenames
+        duplicates = {
+            name: paths
+            for name, paths in self.filename_to_abs_path.items()
+            if len(paths) > 1
+        }
+
+        if duplicates:
+            messages = []
+            for filename, paths in duplicates.items():
+                messages.append(
+                    f"- {filename}:\n    " + "\n    ".join(paths)
+                )
+
+            raise RuntimeError(
+                "AutoLinksPlugin found duplicate filenames. "
+                "Filenames must be unique across the docs tree:\n\n"
+                + "\n".join(messages)
+            )
