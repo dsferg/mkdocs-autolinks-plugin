@@ -9,142 +9,81 @@ from mkdocs.plugins import BasePlugin
 
 LOG = logging.getLogger("mkdocs.plugins." + __name__)
 
-# Regex groups:
-# 0: Whole markdown link e.g. [Alt-text](url)
-# 1: Alt text
-# 2: Full URL e.g. url + hash anchor
-# 3: Filename e.g. filename.md
-# 4: File extension
-# 5: Hash anchor
-# 6: Image title
-AUTOLINK_RE = (
-    r"(?:\!\[\]|\[([^\]]+)\])"
-    r"\((([^)/]+\.(md|png|jpg|jpeg|bmp|gif|svg|webp))(#[^)]*)*)(\s(\".*\"))*\)"
+# Match HTML anchor/image tags with relative file references
+# We only rewrite links that point to local filenames
+HTML_LINK_RE = re.compile(
+    r'href="([^":]+?\.(md|png|jpg|jpeg|bmp|gif|svg|webp))(#[^"]*)?"'
 )
-
-FENCE_RE = re.compile(r"^(```|~~~)")
-COMMENT_START = "<!--"
-COMMENT_END = "-->"
-
-
-class AutoLinkReplacer:
-    def __init__(self, base_docs_dir, abs_page_path, filename_to_abs_path):
-        self.base_docs_dir = base_docs_dir
-        self.abs_page_path = abs_page_path
-        self.filename_to_abs_path = filename_to_abs_path
-
-    def __call__(self, match):
-        filename = match.group(3).strip()
-
-        # Ignore dotfile references silently
-        if filename.startswith("."):
-            return match.group(0)
-
-        abs_linker_dir = os.path.dirname(self.abs_page_path)
-
-        if filename not in self.filename_to_abs_path:
-            LOG.warning(
-                "AutoLinksPlugin unable to find %s in directory %s",
-                filename,
-                self.base_docs_dir,
-            )
-            return match.group(0)
-
-        abs_link_paths = self.filename_to_abs_path[filename]
-        abs_link_path = abs_link_paths[0]
-
-        rel_link_path = quote(
-            pathlib.PurePath(
-                os.path.relpath(abs_link_path, abs_linker_dir)
-            ).as_posix()
-        )
-
-        return match.group(0).replace(match.group(3), rel_link_path)
-
 
 class AutoLinksPlugin(BasePlugin):
     def __init__(self):
         self.filename_to_abs_path = None
 
-    def on_page_markdown(self, markdown, page, config, files, **kwargs):
-        if self.filename_to_abs_path is None:
-            self.init_filename_to_abs_path(files)
+    def on_files(self, files, config):
+        """
+        Build filename lookup once at start.
+        """
+        self.filename_to_abs_path = defaultdict(list)
+        for file_ in files:
+            filename = os.path.basename(file_.abs_src_path)
+            self.filename_to_abs_path[filename].append(file_.abs_src_path)
+
+    def on_page_content(self, html, page, config, files):
+        """
+        Run AFTER macros + markdown conversion.
+        Now we operate safely on HTML.
+        """
 
         base_docs_dir = config["docs_dir"]
         abs_page_path = page.file.abs_src_path
-        replacer = AutoLinkReplacer(
-            base_docs_dir, abs_page_path, self.filename_to_abs_path
-        )
+        abs_linker_dir = os.path.dirname(abs_page_path)
 
+        def replacer(match):
+            filename = os.path.basename(match.group(1))
+
+            if filename not in self.filename_to_abs_path:
+                LOG.warning(
+                    "AutoLinksPlugin unable to find %s in directory %s",
+                    filename,
+                    base_docs_dir,
+                )
+                return match.group(0)
+
+            abs_link_paths = self.filename_to_abs_path[filename]
+
+            if len(abs_link_paths) > 1:
+                LOG.warning(
+                    "AutoLinksPlugin: Duplicate filename referred to in '%s': '%s' exists at %s",
+                    abs_page_path,
+                    filename,
+                    abs_link_paths,
+                )
+
+            abs_link_path = abs_link_paths[0]
+            rel_link_path = quote(
+                pathlib.PurePath(
+                    os.path.relpath(abs_link_path, abs_linker_dir)
+                ).as_posix()
+            )
+
+            anchor = match.group(3) or ""
+            return f'href="{rel_link_path}{anchor}"'
+
+        # Only process links outside HTML comments
+        result = []
         in_comment = False
-        in_fence = False
-        output = []
 
-        for line in markdown.splitlines(keepends=True):
-            stripped = line.strip()
+        for line in html.splitlines(keepends=True):
+            if "<!--" in line:
+                in_comment = True
 
-            # Toggle fenced code blocks
-            if FENCE_RE.match(stripped):
-                in_fence = not in_fence
-                output.append(line)
-                continue
-
-            # Handle multi-line HTML comments
             if in_comment:
-                output.append(line)
-                if COMMENT_END in line:
+                result.append(line)
+                if "-->" in line:
                     in_comment = False
                 continue
 
-            if COMMENT_START in line:
-                if COMMENT_END not in line:
-                    in_comment = True
+            processed = HTML_LINK_RE.sub(replacer, line)
+            result.append(processed)
 
-                # Process only visible content before the comment
-                visible, comment = line.split(COMMENT_START, 1)
-                processed = re.sub(AUTOLINK_RE, replacer, visible)
-                output.append(processed + COMMENT_START + comment)
-                continue
-
-            # Inside fenced code block
-            if in_fence:
-                output.append(line)
-                continue
-
-            # Safe to process autolinks
-            processed = re.sub(AUTOLINK_RE, replacer, line)
-            output.append(processed)
-
-        return "".join(output)
-
-    def init_filename_to_abs_path(self, files):
-        self.filename_to_abs_path = defaultdict(list)
-
-        for file_ in files:
-            filename = os.path.basename(file_.abs_src_path)
-
-            # Skip dotfiles only (not dot-directories)
-            if filename.startswith("."):
-                continue
-
-            self.filename_to_abs_path[filename].append(file_.abs_src_path)
-
-        # Report duplicate filenames (do not fail the build)
-        duplicates = {
-            name: paths
-            for name, paths in self.filename_to_abs_path.items()
-            if len(paths) > 1
-        }
-
-        if duplicates:
-            messages = []
-            for filename, paths in duplicates.items():
-                messages.append(
-                    f"- {filename}:\n    " + "\n    ".join(paths)
-                )
-
-            LOG.warning(
-                "AutoLinksPlugin found duplicate filenames. "
-                "Filename-based autolinks may be ambiguous.\n\n%s",
-                "\n".join(messages),
-            )
+        return "".join(result)
