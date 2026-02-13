@@ -22,9 +22,12 @@ AUTOLINK_RE = (
     r"\((([^)/]+\.(md|png|jpg|jpeg|bmp|gif|svg|webp))(#[^)]*)*)(\s(\".*\"))*\)"
 )
 
+# Matches the start of a code block
 FENCE_RE = re.compile(r"^(```|~~~)")
-COMMENT_START = "<!--"
-COMMENT_END = "-->"
+
+# Matches a full HTML comment on a single line
+INLINE_COMMENT_RE = re.compile(r"()")
+COMMENT_START = ""
 
 
 class AutoLinkReplacer:
@@ -43,11 +46,7 @@ class AutoLinkReplacer:
         abs_linker_dir = os.path.dirname(self.abs_page_path)
 
         if filename not in self.filename_to_abs_path:
-            LOG.warning(
-                "AutoLinksPlugin unable to find %s in directory %s",
-                filename,
-                self.base_docs_dir,
-            )
+            # Silent fail allows MkDocs standard linking to take over if needed
             return match.group(0)
 
         abs_link_paths = self.filename_to_abs_path[filename]
@@ -83,37 +82,47 @@ class AutoLinksPlugin(BasePlugin):
         for line in markdown.splitlines(keepends=True):
             stripped = line.strip()
 
-            # Toggle fenced code blocks
+            # 1. Handle Fenced Code Blocks (Toggle State)
             if FENCE_RE.match(stripped):
                 in_fence = not in_fence
                 output.append(line)
                 continue
 
-            # Handle multi-line HTML comments
+            # 2. Skip content if inside a Multi-line Code Block
+            if in_fence:
+                output.append(line)
+                continue
+
+            # 3. Handle Multi-line HTML Comments
             if in_comment:
                 output.append(line)
                 if COMMENT_END in line:
                     in_comment = False
                 continue
 
-            if COMMENT_START in line:
-                if COMMENT_END not in line:
-                    in_comment = True
-
-                # Process only visible content before the comment
-                visible, comment = line.split(COMMENT_START, 1)
-                processed = re.sub(AUTOLINK_RE, replacer, visible)
-                output.append(processed + COMMENT_START + comment)
+            # 4. Handle Start of Multi-line Comment ()
+            if COMMENT_START in line and COMMENT_END not in line:
+                in_comment = True
+                # Process the visible part before the comment starts
+                parts = line.split(COMMENT_START, 1)
+                processed = re.sub(AUTOLINK_RE, replacer, parts[0])
+                output.append(processed + COMMENT_START + parts[1])
                 continue
 
-            # Inside fenced code block
-            if in_fence:
-                output.append(line)
-                continue
-
-            # Safe to process autolinks
-            processed = re.sub(AUTOLINK_RE, replacer, line)
-            output.append(processed)
+            # 5. Handle Inline Comments (Safe Tokenizing)
+            # This splits the line into [text, , text, ]
+            parts = INLINE_COMMENT_RE.split(line)
+            processed_line = []
+            
+            for part in parts:
+                if part.startswith(COMMENT_START):
+                    # It's a comment, append as-is
+                    processed_line.append(part)
+                else:
+                    # It's text, process links
+                    processed_line.append(re.sub(AUTOLINK_RE, replacer, part))
+            
+            output.append("".join(processed_line))
 
         return "".join(output)
 
@@ -123,13 +132,13 @@ class AutoLinksPlugin(BasePlugin):
         for file_ in files:
             filename = os.path.basename(file_.abs_src_path)
 
-            # Skip dotfiles only (not dot-directories)
+            # Skip dotfiles
             if filename.startswith("."):
                 continue
 
             self.filename_to_abs_path[filename].append(file_.abs_src_path)
 
-        # Report duplicate filenames (do not fail the build)
+        # Report duplicates once per build
         duplicates = {
             name: paths
             for name, paths in self.filename_to_abs_path.items()
