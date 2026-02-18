@@ -26,8 +26,9 @@ AUTOLINK_RE = (
 FENCE_RE = re.compile(r"^(```|~~~)")
 
 # Matches a full HTML comment on a single line
-INLINE_COMMENT_RE = re.compile(r"()")
-COMMENT_START = ""
+INLINE_COMMENT_RE = re.compile(r"(<!--.*?-->)")
+COMMENT_START = "<!--"
+COMMENT_END = "-->"
 
 
 class AutoLinkReplacer:
@@ -82,22 +83,24 @@ class AutoLinksPlugin(BasePlugin):
         for line in markdown.splitlines(keepends=True):
             stripped = line.strip()
 
-            # 1. Handle Fenced Code Blocks (Toggle State)
+            # 1. Handle Multi-line HTML Comments (Priority 1)
+            # We check this FIRST so that a line like "``` -->" is treated 
+            # as the end of a comment, NOT the start of a code fence.
+            if in_comment:
+                output.append(line)
+                if COMMENT_END in line:
+                    in_comment = False
+                continue
+
+            # 2. Handle Fenced Code Blocks (Priority 2)
             if FENCE_RE.match(stripped):
                 in_fence = not in_fence
                 output.append(line)
                 continue
 
-            # 2. Skip content if inside a Multi-line Code Block
+            # 3. Skip content if inside a Multi-line Code Block
             if in_fence:
                 output.append(line)
-                continue
-
-            # 3. Handle Multi-line HTML Comments
-            if in_comment:
-                output.append(line)
-                if COMMENT_END in line:
-                    in_comment = False
                 continue
 
             # 4. Handle Start of Multi-line Comment ()
@@ -109,17 +112,14 @@ class AutoLinksPlugin(BasePlugin):
                 output.append(processed + COMMENT_START + parts[1])
                 continue
 
-            # 5. Handle Inline Comments (Safe Tokenizing)
-            # This splits the line into [text, , text, ]
+            # 5. Handle Inline Comments and Standard Text
             parts = INLINE_COMMENT_RE.split(line)
             processed_line = []
             
             for part in parts:
                 if part.startswith(COMMENT_START):
-                    # It's a comment, append as-is
                     processed_line.append(part)
                 else:
-                    # It's text, process links
                     processed_line.append(re.sub(AUTOLINK_RE, replacer, part))
             
             output.append("".join(processed_line))
@@ -132,7 +132,6 @@ class AutoLinksPlugin(BasePlugin):
         for file_ in files:
             filename = os.path.basename(file_.abs_src_path)
 
-            # Skip dotfiles
             if filename.startswith("."):
                 continue
 
