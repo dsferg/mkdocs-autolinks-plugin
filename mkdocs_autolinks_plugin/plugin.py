@@ -66,6 +66,7 @@ class AutoLinkReplacer:
 class AutoLinksPlugin(BasePlugin):
     config_scheme = (
         ('fail_on_duplicates', config_options.Type(bool, default=False)),
+        ('exclude_filenames', config_options.Type(list, default=[])),
     )
 
     def __init__(self):
@@ -142,6 +143,10 @@ class AutoLinksPlugin(BasePlugin):
             filename = os.path.basename(file_.abs_src_path)
 
             if filename.startswith("."):
+                continue
+
+            # Skip excluded filenames
+            if filename in self.config['exclude_filenames']:
                 continue
 
             self.filename_to_abs_path[filename].append(file_.abs_src_path)

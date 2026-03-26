@@ -171,7 +171,7 @@ class TestDuplicateDetection:
     def test_duplicate_warning_logged(self, caplog):
         """Test that duplicate filenames generate a warning"""
         plugin = AutoLinksPlugin()
-        plugin.config = {'fail_on_duplicates': False}
+        plugin.config = {'fail_on_duplicates': False, 'exclude_filenames': []}
 
         # Create mock files with duplicate names
         mock_files = [
@@ -190,7 +190,7 @@ class TestDuplicateDetection:
     def test_fail_on_duplicates_raises_exception(self):
         """Test that fail_on_duplicates=True raises an exception"""
         plugin = AutoLinksPlugin()
-        plugin.config = {'fail_on_duplicates': True}
+        plugin.config = {'fail_on_duplicates': True, 'exclude_filenames': []}
 
         # Create mock files with duplicate names
         mock_files = [
@@ -210,7 +210,7 @@ class TestDuplicateDetection:
     def test_dotfiles_excluded_from_mapping(self):
         """Test that dotfiles are not included in the filename mapping"""
         plugin = AutoLinksPlugin()
-        plugin.config = {'fail_on_duplicates': False}
+        plugin.config = {'fail_on_duplicates': False, 'exclude_filenames': []}
 
         mock_files = [
             MockFile("/fake/docs/.hidden.md"),
@@ -222,6 +222,49 @@ class TestDuplicateDetection:
         # Dotfile should not be in mapping
         assert ".hidden.md" not in plugin.filename_to_abs_path
         assert "normal.md" in plugin.filename_to_abs_path
+
+    def test_exclude_filenames(self):
+        """Test that excluded filenames are not included in the mapping"""
+        plugin = AutoLinksPlugin()
+        plugin.config = {
+            'fail_on_duplicates': False,
+            'exclude_filenames': ['nav.md', 'header.md']
+        }
+
+        mock_files = [
+            MockFile("/fake/docs/nav.md"),
+            MockFile("/fake/docs/subdir/nav.md"),
+            MockFile("/fake/docs/header.md"),
+            MockFile("/fake/docs/normal.md"),
+        ]
+
+        plugin.init_filename_to_abs_path(mock_files)
+
+        # Excluded files should not be in mapping
+        assert "nav.md" not in plugin.filename_to_abs_path
+        assert "header.md" not in plugin.filename_to_abs_path
+        # Normal file should be in mapping
+        assert "normal.md" in plugin.filename_to_abs_path
+
+    def test_exclude_filenames_prevents_duplicate_errors(self):
+        """Test that excluding duplicates prevents errors"""
+        plugin = AutoLinksPlugin()
+        plugin.config = {
+            'fail_on_duplicates': True,
+            'exclude_filenames': ['nav.md']
+        }
+
+        mock_files = [
+            MockFile("/fake/docs/nav.md"),
+            MockFile("/fake/docs/subdir/nav.md"),  # Would be duplicate, but excluded
+            MockFile("/fake/docs/normal.md"),
+        ]
+
+        # Should not raise an exception because nav.md is excluded
+        plugin.init_filename_to_abs_path(mock_files)
+
+        # Verify nav.md is not in mapping
+        assert "nav.md" not in plugin.filename_to_abs_path
 
 
 class TestImageLinks:

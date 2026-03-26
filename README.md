@@ -22,12 +22,13 @@ These changes are intended to prevent ambiguous links and unexpected rewrites wh
 
 ## Configuration
 
-The plugin supports the following configuration option in your `mkdocs.yml`:
+The plugin supports the following configuration options in your `mkdocs.yml`:
 
 ```yaml
 plugins:
   - autolinks:
       fail_on_duplicates: false  # Default is false
+      exclude_filenames: []      # Default is empty list
 ```
 
 ### Options
@@ -35,6 +36,11 @@ plugins:
 - **`fail_on_duplicates`** (boolean, default: `false`):
   - When `false`: Logs a warning when duplicate filenames are found and uses the first file
   - When `true`: Fails the build with an error when duplicate filenames are found
+
+- **`exclude_filenames`** (list, default: `[]`):
+  - List of filenames to exclude from autolink processing
+  - Useful for files like `nav.md` that appear in multiple directories
+  - Example: `exclude_filenames: ['nav.md', 'header.md']`
 
 ## License
 
