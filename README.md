@@ -16,9 +16,25 @@ This fork preserves the core behavior of the original plugin, with a few intenti
 
 - Files whose filename starts with `.` (dotfiles) are ignored and not considered for link resolution
 
-- If multiple files share the same filename, the build fails with a clear error instead of choosing one arbitrarily
+- If multiple files share the same filename, a warning is logged and the first file is used (instead of silently choosing one arbitrarily)
 
 These changes are intended to prevent ambiguous links and unexpected rewrites while keeping the plugin easy to use.
+
+## Configuration
+
+The plugin supports the following configuration option in your `mkdocs.yml`:
+
+```yaml
+plugins:
+  - autolinks:
+      fail_on_duplicates: false  # Default is false
+```
+
+### Options
+
+- **`fail_on_duplicates`** (boolean, default: `false`):
+  - When `false`: Logs a warning when duplicate filenames are found and uses the first file
+  - When `true`: Fails the build with an error when duplicate filenames are found
 
 ## License
 

@@ -1,0 +1,8 @@
+# Development dependencies for mkdocs-autolinks-plugin
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=7.0.0
+
+# Main dependency (also in setup.py)
+mkdocs>=1.2.3

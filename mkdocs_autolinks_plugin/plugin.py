@@ -6,6 +6,7 @@ from collections import defaultdict
 from urllib.parse import quote
 
 from mkdocs.plugins import BasePlugin
+from mkdocs.config import config_options
 
 LOG = logging.getLogger("mkdocs.plugins." + __name__)
 
@@ -19,7 +20,7 @@ LOG = logging.getLogger("mkdocs.plugins." + __name__)
 # 6: Image title
 AUTOLINK_RE = (
     r"(?:\!\[\]|\[([^\]]+)\])"
-    r"\((([^)/]+\.(md|png|jpg|jpeg|bmp|gif|svg|webp))(#[^)]*)*)(\s(\".*\"))*\)"
+    r"\((([^)/]+\.(md|png|jpg|jpeg|bmp|gif|svg|webp))(#[^)]*)*)(\s(\".*?\"))*\)"
 )
 
 # Matches the start of a code block
@@ -63,6 +64,10 @@ class AutoLinkReplacer:
 
 
 class AutoLinksPlugin(BasePlugin):
+    config_scheme = (
+        ('fail_on_duplicates', config_options.Type(bool, default=False)),
+    )
+
     def __init__(self):
         self.filename_to_abs_path = None
 
@@ -76,6 +81,10 @@ class AutoLinksPlugin(BasePlugin):
             base_docs_dir, abs_page_path, self.filename_to_abs_path
         )
 
+        return self._process_markdown_lines(markdown, replacer)
+
+    def _process_markdown_lines(self, markdown, replacer):
+        """Process markdown line by line, skipping autolinks in code blocks and comments."""
         in_comment = False
         in_fence = False
         output = []
@@ -84,7 +93,7 @@ class AutoLinksPlugin(BasePlugin):
             stripped = line.strip()
 
             # 1. Handle Multi-line HTML Comments (Priority 1)
-            # We check this FIRST so that a line like "``` -->" is treated 
+            # We check this FIRST so that a line like "``` -->" is treated
             # as the end of a comment, NOT the start of a code fence.
             if in_comment:
                 output.append(line)
@@ -115,13 +124,13 @@ class AutoLinksPlugin(BasePlugin):
             # 5. Handle Inline Comments and Standard Text
             parts = INLINE_COMMENT_RE.split(line)
             processed_line = []
-            
+
             for part in parts:
                 if part.startswith(COMMENT_START):
                     processed_line.append(part)
                 else:
                     processed_line.append(re.sub(AUTOLINK_RE, replacer, part))
-            
+
             output.append("".join(processed_line))
 
         return "".join(output)
@@ -147,12 +156,30 @@ class AutoLinksPlugin(BasePlugin):
         if duplicates:
             messages = []
             for filename, paths in duplicates.items():
+                # Mark the first path (the one that will be used)
+                path_list = []
+                for i, path in enumerate(paths):
+                    if i == 0:
+                        path_list.append(f"{path}  ← will be used")
+                    else:
+                        path_list.append(f"{path}  ← unreachable")
+
                 messages.append(
-                    f"- {filename}:\n    " + "\n    ".join(paths)
+                    f"- {filename}:\n    " + "\n    ".join(path_list)
                 )
 
-            LOG.warning(
-                "AutoLinksPlugin found duplicate filenames. "
-                "Filename-based autolinks may be ambiguous.\n\n%s",
-                "\n".join(messages),
+            error_message = (
+                "AutoLinksPlugin found duplicate filenames.\n"
+                "Links like [text](filename.md) will always resolve to the FIRST file listed.\n"
+                "Other files with the same name will be unreachable via filename-only links.\n\n"
+                "To fix this:\n"
+                "- Rename files to be unique, OR\n"
+                "- Use full relative paths in your links instead of just filenames\n\n"
+                "Duplicates found:\n"
+                + "\n".join(messages)
             )
+
+            if self.config['fail_on_duplicates']:
+                raise Exception(error_message)
+            else:
+                LOG.warning(error_message)
